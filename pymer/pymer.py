@@ -4,6 +4,7 @@ import argparse, rnafold, math
 
 
 def analyse(sequence,
+						GC=True,
 						Tm=62.0,
 						Na=50.,
 						K=0.,
@@ -18,11 +19,14 @@ def analyse(sequence,
 	"""
 	ret = []
 	for i, base in enumerate(sequence):
+		if GC and base.upper() not in ['G','C']:
+			ret.append((base, '', float('-inf'), None))
+			continue
 		#find the appropriate length of the primer
 		ok=False
 		the_Tm = Tm - 100.
 		for primer_length in range(min_length, min(i, max_length)):
-			pseq = sequence[i-primer_length:i]
+			pseq = sequence[i-primer_length+1:i+1]
 			last_Tm = mt.Tm_NN(pseq,
 												 Na=Na,
 												 K=K,
@@ -36,16 +40,16 @@ def analyse(sequence,
 				if abs(last_Tm - Tm) < abs(the_Tm - Tm):
 					the_Tm = last_Tm
 					primer_length = primer_length -1
-					pseq = sequence[i-primer_length:i]
+					pseq = sequence[i-primer_length+1:i+1]
 				ok=True
 				break
 		if not ok:
-			ret.append((base, 0, float('-inf'), None))
+			ret.append((base, '', float('-inf'), None))
 			continue
 
 		dG = rnafold.fold(pseq)
 
-		ret.append((base, primer_length, dG, the_Tm))
+		ret.append((base, pseq, dG, the_Tm))
 
 	return ret
 
@@ -71,31 +75,31 @@ def is_valid_sequence(parser, x):
 
 def print_output(sequence, fwd, rev):
 	rsequence = reverse_complement(sequence)
-	max_flength = max(x[1] for x in fwd)
+	max_flength = max(len(x[1]) for x in fwd)
 	min_fdG = min(x[2] for x in fwd if x[2] != float('-inf'))
-	max_rlength = max(x[1] for x in rev)
+	max_rlength = max(len(x[1]) for x in rev)
 	min_rdG = min(x[2] for x in rev if x[2] != float('-inf'))
 
 	pad = 21+max_rlength
 	r_fmt = '{: >10s}=ss \"{:->'+str(max_rlength)+'s}\" {:2d}bp'
 	m_fmt = ' :{}-{:'+str(math.ceil(math.log(len(fwd),10)))+'d}-{}: '
 	f_fmt = '{:2d}bp \"{:->'+str(max_flength)+'s}\" ss={: <10s}'
-	for i, ((f_base, f_length, f_dG, f_Tm), 
-					(r_base, r_length, r_dG, r_Tm)) in enumerate(zip(fwd,reversed(rev))):
+	for i, ((f_base, f_seq, f_dG, f_Tm), 
+					(r_base, r_seq, r_dG, r_Tm)) in enumerate(zip(fwd,reversed(rev))):
 		j = len(sequence)-i
 		mval = m_fmt.format(r_base,
 												i,
 												f_base) 
-		if f_length > 0:
-			fval = f_fmt.format(f_length, 
-													sequence[i-f_length:i], 
+		if f_seq:
+			fval = f_fmt.format(len(f_seq),
+													f_seq,
 													'#'*int(round(10.*f_dG/min_fdG)))
 		else:
 			fval = '' 
-		if r_length > 0:
+		if r_seq:
 			rval = r_fmt.format('#'*int(round(10.*r_dG/min_rdG)),
-													rsequence[j-r_length:j], 
-													r_length)
+													r_seq, 
+													len(r_seq))
 		else:
 			rval = ' '*pad
 
@@ -115,6 +119,13 @@ if __name__ == '__main__':
 										 default=62.0,
 										 help='Target primer melting temperature, '+
 													'used to calculate length')
+
+	parser.add_argument('-noGC', '-noGC',
+											dest='GC',
+											action='store_false',
+											default=True,
+											help='Disable the requirement for primers to end with '
+														+'G	or C')
 
 	parser.add_argument('-Na',
 										 type=float,
